@@ -58,6 +58,13 @@ h2{font-size:24px;margin:4px 0 12px;text-align:center}
 .xptext{font-size:12px;color:var(--sub);margin-top:3px}
 .bubble{position:absolute;top:-8px;left:50%;transform:translate(-50%,-100%);background:#fff;border-radius:14px;padding:6px 12px;font-size:15px;white-space:nowrap;box-shadow:0 3px 10px #0001;animation:fadein .2s}
 
+/* がくねん */
+.gradebar{display:flex;gap:6px;margin-bottom:10px;background:#fff;border-radius:16px;padding:5px;box-shadow:0 2px 0 var(--line)}
+.gchip{flex:1;padding:8px 0;border-radius:12px;background:none;font-size:20px;font-weight:900;color:var(--sub)}
+.gchip small{font-size:11px}
+.gchip.on{background:var(--yellow);color:var(--ink)}
+.choices.one{grid-template-columns:1fr}
+.choice.mcq{font-family:var(--font);font-size:19px;min-height:62px;padding:10px 12px;line-height:1.4}
 /* メニュー */
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .tile{border-radius:22px;padding:16px 10px;min-height:104px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
@@ -195,6 +202,7 @@ input.name{font-size:22px;padding:10px 14px;border-radius:14px;border:3px solid 
 <div id="app"></div>
 <noscript>このアプリを つかうには JavaScript を オンに してください。</noscript>
 <script src="data.js"></script>
+<script src="grades.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

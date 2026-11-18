@@ -1,6 +1,6 @@
 // こくごで遊ぼう — アプリ本体
 'use strict';
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const $ = s => document.querySelector(s);
 const app = $('#app');
 const rnd = n => Math.floor(Math.random() * n);
@@ -10,7 +10,10 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; };
 
 // ================= セーブデータ =================
-const KEY = 'kokugo-asobou-v1';
+const SKEY = 'kokugo-asobou-settings', GKEY = 'kokugo-asobou-grade';
+const keyOf = g => g === 1 ? 'kokugo-asobou-v1' : 'kokugo-asobou-v1-g' + g;
+let GRADE = Math.min(6, Math.max(1, +(localStorage.getItem(GKEY) || 1)));
+let KEY = keyOf(GRADE);
 const DEFAULT = () => ({
   name: '', xp: 0, stars: 0, rounds: 0, owned: [], wearing: {},
   col: { h: {}, k: {}, j: {} }, traced: { h: {}, k: {}, j: {} },
@@ -18,11 +21,20 @@ const DEFAULT = () => ({
   days: { last: '', streak: 0, total: 0 },
   settings: { voice: true, sound: true, slow: false },
 });
-let S;
-try { S = Object.assign(DEFAULT(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { S = DEFAULT(); }
-for (const k of ['col', 'traced']) for (const t of ['h', 'k', 'j']) S[k][t] = S[k][t] || {};
-S.settings = Object.assign(DEFAULT().settings, S.settings);
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+let S, SET;
+try { SET = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch (e) { SET = null; }
+if (!SET) { try { SET = (JSON.parse(localStorage.getItem(keyOf(1)) || '{}')).settings; } catch (e) {} }
+SET = Object.assign(DEFAULT().settings, SET || {});
+// がくねんごとに べつの きろく（キャラ・ずかん・⭐）
+function loadProfile(g) {
+  GRADE = g; KEY = keyOf(g);
+  try { localStorage.setItem(GKEY, String(g)); } catch (e) {}
+  try { S = Object.assign(DEFAULT(), JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { S = DEFAULT(); }
+  for (const k of ['col', 'traced']) for (const t of ['h', 'k', 'j']) S[k][t] = S[k][t] || {};
+  S.settings = SET;
+}
+loadProfile(GRADE);
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); localStorage.setItem(SKEY, JSON.stringify(SET)); } catch (e) {} };
 
 // ================= おと・こえ =================
 let AC = null;
@@ -128,6 +140,39 @@ function fillChoices(correct, preferred, pool, n) {
 const firstWord = c => HIRA_WORDS.find(w => w[0][0] === c);
 const BIG = { 'ゃ': 'や', 'ゅ': 'ゆ', 'ょ': 'よ', 'っ': 'つ', 'ぁ': 'あ', 'ぃ': 'い', 'ぅ': 'う', 'ぇ': 'え', 'ぉ': 'お' };
 
+// ---- がくねん べつ データ ----
+const kanjiOf = g => g === 1 ? KANJI : ((window.GRADE_DATA || {})[g] || { kanji: [] }).kanji;
+const KL = () => kanjiOf(GRADE);
+const GD = () => (window.GRADE_DATA || {})[GRADE] || {};
+const altOf = K => K.alt || KANJI_ALT[K.k] || [];
+const isKana = c => /[\u3041-\u309f\u30a0-\u30ff]/.test(c);
+function stemOf(K) { // ことばの なかの その かんじの よみ（ほかが かなだけの とき）
+  const i = K.w.indexOf(K.k); if (i < 0) return '';
+  const pre = K.w.slice(0, i), suf = K.w.slice(i + 1);
+  if (![...pre + suf].every(isKana) || K.r.length <= pre.length + suf.length) return '';
+  return K.r.slice(pre.length, K.r.length - suf.length);
+}
+function mcq(D, tag, emoji) {
+  const it = wpick(D, x => tag + ':' + x.q + (x.s || '') + x.a);
+  const lng = Math.max(...it.c.map(c => c.length));
+  return { key: tag + ':' + it.q + (it.s || '') + it.a, emoji, big: it.s ? esc(it.s) : '', bigCls: 'sent', text: esc(it.q), say: (it.s ? it.s + '。 ' : '') + it.q,
+    choices: shuffle(it.c), answer: it.a, explain: esc(it.x || `こたえは「${it.a}」`), wide: true, xlong: lng > 6 };
+}
+// ローマ字（くんれいしき・ヘボンしきで ちがう もじは つかわない）
+const RM = { 'あ':'a','い':'i','う':'u','え':'e','お':'o','か':'ka','き':'ki','く':'ku','け':'ke','こ':'ko','さ':'sa','す':'su','せ':'se','そ':'so',
+  'た':'ta','て':'te','と':'to','な':'na','に':'ni','ぬ':'nu','ね':'ne','の':'no','は':'ha','ひ':'hi','へ':'he','ほ':'ho','ま':'ma','み':'mi','む':'mu','め':'me','も':'mo',
+  'や':'ya','ゆ':'yu','よ':'yo','ら':'ra','り':'ri','る':'ru','れ':'re','ろ':'ro','わ':'wa','が':'ga','ぎ':'gi','ぐ':'gu','げ':'ge','ご':'go','ざ':'za','ず':'zu','ぜ':'ze','ぞ':'zo',
+  'だ':'da','で':'de','ど':'do','ば':'ba','び':'bi','ぶ':'bu','べ':'be','ぼ':'bo','ぱ':'pa','ぴ':'pi','ぷ':'pu','ぺ':'pe','ぽ':'po' };
+const romaji = w => { let o = ''; for (let i = 0; i < w.length; i++) { const c = w[i];
+  if (c === 'ん') o += 'n'; else if (c === 'っ') o += (RM[w[i + 1]] || '?')[0]; else o += RM[c] || '?'; } return o; };
+const ROMAJI_WORDS = () => HIRA_WORDS.filter(([w]) => { if (w.endsWith('っ') || /ん[あいうえおやゆよ]/.test(w)) return false;
+  const r = romaji(w); return !r.includes('?') && !/(ou|oo|ei|uu|aa|ii|ee)/.test(r); });
+function romajiWrongs(r) {
+  const sw = { a: 'o', o: 'a', i: 'e', e: 'i', u: 'o', k: 'g', g: 'k', s: 'z', z: 's', t: 'd', d: 't', h: 'b', b: 'h', m: 'n', n: 'm', r: 'l', p: 'b', y: 'i', w: 'u' };
+  const out = new Set(); let tries = 0;
+  while (out.size < 3 && tries++ < 60) { const i = rnd(r.length); const c = sw[r[i]]; if (!c) continue; const v = r.slice(0, i) + c + r.slice(i + 1); if (v !== r) out.add(v); }
+  return [...out];
+}
 const G = {
   // --- ひらがな ---
   hiraListen() {
@@ -197,25 +242,70 @@ const G = {
       explain: r[2] ? `がいこくから きた ことばは カタカナで かくよ。「${r[0]}」` : `「${r[0]}」は ひらがなで かくよ`, wide: true };
   },
   // --- かんじ ---
-  kanjiRead() {
-    const K = wpick(KANJI, k => 'j:' + k.k);
+  kanjiRead(list) {
+    list = list || KL();
+    const K = wpick(list, k => 'j:' + k.k);
     const big = esc(K.w).replace(K.k, `<span class="hl">${K.k}</span>`);
-    const alt = KANJI_ALT[K.k] || [];
-    const others = KANJI.filter(x => x.r !== K.r && !alt.includes(x.r)).map(x => x.r);
+    const alt = altOf(K);
+    const others = list.filter(x => x.r !== K.r && !alt.includes(x.r)).map(x => x.r);
     const near = others.filter(r => Math.abs(r.length - K.r.length) <= 1);
-    return { key: 'j:' + K.k, emoji: K.e, big, text: K.w === K.k ? 'なんと よむかな？' : 'この ことばの よみかたは？', say: K.w === K.k ? 'この かんじ、なんて よむかな？' : 'この ことば、なんて よむかな？',
+    return { key: 'j:' + K.k, emoji: K.e, big, bigCls: K.w.length > 2 ? 'mid' : '', text: K.w === K.k ? 'なんと よむかな？' : 'この ことばの よみかたは？', say: K.w === K.k ? 'この かんじ、なんて よむかな？' : 'この ことば、なんて よむかな？',
       choices: fillChoices(K.r, near, others, 4), answer: K.r, collect: [['j', K.k]], explain: `「${K.w}」は「${K.r}」と よむよ`, after: K.r, wide: true };
   },
   kanjiPick() {
-    const K = wpick(KANJI, k => 'j:' + k.k);
-    const set = KANJI.map(x => x.k);
-    const same = KANJI.filter(x => x.r === K.r || (KANJI_ALT[x.k] || []).includes(K.r) || (x.w === x.k && (KANJI_ALT[K.k] || []).includes(x.r))).map(x => x.k);
+    const list = KL();
+    const K = wpick(list, k => 'j:' + k.k);
+    const set = list.map(x => x.k);
+    const st = stemOf(K);
+    const clash = x => x.r === K.r || altOf(x).includes(K.r) || (st && (altOf(x).includes(st) || stemOf(x) === st)) || (x.w === x.k && altOf(K).includes(x.r));
+    const same = list.filter(clash).map(x => x.k);
     const pref = (KANJI_LOOKALIKE[K.k] || []).filter(c => set.includes(c) && !same.includes(c));
     const pool = set.filter(c => !same.includes(c));
     const big = K.w === K.k ? esc(K.r) : esc(K.w).replace(K.k, '<span class="blank">?</span>');
     return { key: 'j:' + K.k, emoji: K.e, big, bigCls: 'mid', text: K.w === K.k ? 'この ことばの かんじは どれ？' : '？に はいる かんじは どれ？',
       sub: K.w === K.k ? '' : `（${K.r}）`, say: K.r, choices: fillChoices(K.k, pref, pool, 4), answer: K.k, collect: [['j', K.k]],
       explain: `「${K.r}」は「${K.w}」と かくよ` };
+  },
+  kanjiReview() {
+    const prev = [];
+    for (let g = 1; g < GRADE; g++) prev.push(...kanjiOf(g));
+    const q = G.kanjiRead(prev);
+    q.key = 'jr:' + q.key.slice(2); q.collect = []; q.sub = `${GRADE - 1 > 1 ? '1〜' + (GRADE - 1) : 1}ねんせいの ふくしゅう`;
+    return q;
+  },
+  // --- じゅくご・おくりがな ---
+  jukugo() {
+    const D = GD().jukugo;
+    const w = wpick(D, x => 'jk:' + x[0]);
+    const others = D.filter(x => x[1] !== w[1]).map(x => x[1]);
+    const near = others.filter(r => Math.abs(r.length - w[1].length) <= 1);
+    return { key: 'jk:' + w[0], emoji: '📚', big: esc(w[0]), bigCls: w[0].length > 2 ? 'mid' : '', text: 'この じゅくごの よみかたは？', say: 'この ことば、なんて よむかな？',
+      choices: fillChoices(w[1], near, others, 4), answer: w[1], collect: [...w[0]].filter(c => KL().some(x => x.k === c)).map(c => ['j', c]),
+      explain: `「${w[0]}」は「${w[1]}」と よむよ`, after: w[1], wide: true };
+  },
+  okuri() {
+    const o = wpick(GD().okuri, x => 'ok:' + x[0]);
+    return { key: 'ok:' + o[0], emoji: '✍️', big: esc(o[2]), bigCls: 'mid', text: 'おくりがなが ただしいのは どっち？', say: o[2],
+      choices: shuffle([o[0], o[1]]), answer: o[0], explain: `「${o[2]}」は「${o[0]}」と かくよ`, wide: true };
+  },
+  // --- ぶんの きまり・ことわざ ---
+  bunpo() { return mcq(GD().bunpo, 'bp', '📐'); },
+  kotowaza() { return mcq(GD().kotowaza, 'kt', '📜'); },
+  // --- ローマ字 ---
+  romajiPick() {
+    const w = pick(ROMAJI_WORDS());
+    const r = romaji(w[0]);
+    return { key: 'rm:' + w[0], emoji: w[1], big: esc(w[0]), bigCls: 'mid', text: 'ローマ字で かくと どれ？', say: w[0],
+      choices: shuffle([r, ...romajiWrongs(r)]), answer: r, explain: `「${w[0]}」は「${r}」と かくよ`, wide: true, latin: true };
+  },
+  romajiRead() {
+    const list = ROMAJI_WORDS();
+    const w = pick(list);
+    const r = romaji(w[0]);
+    const others = shuffle(list.filter(x => x[0] !== w[0] && x[0].length === w[0].length)).slice(0, 3).map(x => x[0]);
+    const pool = shuffle(list.filter(x => x[0] !== w[0])).map(x => x[0]);
+    return { key: 'rm:' + w[0], emoji: '🔤', big: `<span style="font-family:Arial,sans-serif">${esc(r)}</span>`, bigCls: 'mid', text: 'なんと よむかな？', say: 'この ローマ字、なんて よむかな？',
+      choices: fillChoices(w[0], others, pool, 4), answer: w[0], explain: `「${r}」は「${w[0]}」だよ`, after: w[0], wide: true };
   },
   // --- ことば ---
   opposite() {
@@ -277,7 +367,7 @@ const G = {
   },
 };
 
-const WORLDS = {
+const WORLDS_G1 = {
   hira: { name: 'ひらがな', icon: '🌸', color: 'var(--pink)', modes: [
     { id: 'hiraListen', name: 'きいて えらぼう', icon: '👂', desc: 'きこえた もじを さがそう', voice: true },
     { id: 'hiraFirst', name: 'はじめの もじ', icon: '🍎', desc: 'ことばの さいしょの もじは？' },
@@ -299,7 +389,36 @@ const WORLDS = {
     { id: 'wordBlank', name: 'わ・お・え', icon: '🙋', desc: 'ことばの なかの おと' },
     { id: 'order', name: 'ぶんを つくろう', icon: '🧩', desc: 'ことばを ならべかえ' } ] },
 };
-const TRACE_SETS = { h: { name: 'ひらがな', list: HIRA }, k: { name: 'カタカナ', list: KATA }, j: { name: 'かんじ', list: KANJI.map(x => x.k) } };
+const KOTO_NAME = { 3: 'ことわざ・ローマ字', 4: 'かんようく・ことわざ', 5: 'こじせいご・かんようく', 6: 'よじじゅくご・ことわざ' };
+function worldsFor(g) {
+  if (g === 1) return WORLDS_G1;
+  const W = {};
+  W.kanji = { name: `${g}ねんの かんじ`, icon: '🏯', color: 'var(--purple)', modes: [
+    { id: 'kanjiRead', name: 'かんじを よもう', icon: '📖', desc: `${g}ねんせいの かんじ ${KL().length}じ` },
+    { id: 'kanjiPick', name: 'かんじを えらぼう', icon: '🔍', desc: 'ことばに あう かんじは？' },
+    { id: 'kanjiReview', name: 'まえの がくねんの ふくしゅう', icon: '🔁', desc: `1〜${g - 1}ねんせいの かんじ`, noMix: true } ] };
+  if (g === 2) W.kata = Object.assign({}, WORLDS_G1.kata);
+  W.juku = { name: 'じゅくご・おくりがな', icon: '📚', color: 'var(--blue)', modes: [
+    { id: 'jukugo', name: 'じゅくごを よもう', icon: '📚', desc: '2もじ・3もじの ことば' },
+    { id: 'okuri', name: 'おくりがな', icon: '✍️', desc: 'ただしい おくりがなは？' } ] };
+  W.bunpo = { name: 'ぶんの きまり', icon: '📐', color: 'var(--green)', modes: [
+    { id: 'bunpo', name: 'ぶんの きまり', icon: '📐', desc: g === 2 ? 'しゅご・じゅつご・こそあど など' : g === 3 ? 'しゅうしょくご・こそあど・つなぎことば' : g === 4 ? 'つなぎことば・ぶしゅ・じゅくご' : 'けいご・じゅくごの くみたて など' } ] };
+  if (g === 2) W.kotoba = Object.assign({}, WORLDS_G1.kotoba);
+  else {
+    const modes = [{ id: 'kotowaza', name: KOTO_NAME[g], icon: '📜', desc: 'いみや ことばを えらぼう' }];
+    if (g === 3) modes.push({ id: 'romajiPick', name: 'ローマ字で かこう', icon: '🔤', desc: 'ひらがな → ローマ字' }, { id: 'romajiRead', name: 'ローマ字を よもう', icon: '🅰️', desc: 'ローマ字 → ひらがな' });
+    else modes.push({ id: 'romajiPick', name: 'ローマ字の ふくしゅう', icon: '🔤', desc: '3ねんで ならった ローマ字', noMix: true });
+    W.koto = { name: KOTO_NAME[g], icon: '📜', color: 'var(--orange)', modes };
+  }
+  return W;
+}
+let WORLDS = worldsFor(GRADE);
+function traceSets() {
+  if (GRADE === 1) return { h: { name: 'ひらがな', list: HIRA }, k: { name: 'カタカナ', list: KATA }, j: { name: 'かんじ', list: KANJI.map(x => x.k) } };
+  const T = { j: { name: `${GRADE}ねんの かんじ`, list: KL().map(x => x.k) } };
+  if (GRADE === 2) T.k = { name: 'カタカナ', list: KATA };
+  return T;
+}
 
 // ================= がめん =================
 let R = null; // いまの ラウンド
@@ -322,7 +441,9 @@ function home() {
   const colN = Object.keys(S.col.h).length + Object.keys(S.col.k).length + Object.keys(S.col.j).length;
   const tile = (id, w) => `<button class="tile" style="background:${w.color}" data-go="${id}"><span class="ic">${w.icon}</span>${w.name}
     ${S.best[id] ? `<span class="badge">⭐${S.best[id]}</span>` : ''}</button>`;
+  const odd = Object.keys(WORLDS).length % 2 === 0;
   app.innerHTML = `<div class="screen">
+    ${gradeBar()}
     <div class="topbar"><span class="pill">⭐ ${S.stars}</span><span class="pill">📅 ${S.days.streak}にち れんぞく</span><span class="spacer"></span>
       <button class="iconbtn" data-go="zukan" aria-label="ずかん">📖</button></div>
     <div class="pet-wrap">${petHTML()}
@@ -330,7 +451,7 @@ function home() {
       <div class="xpbar"><i style="width:${xi.pct}%"></i></div><div class="xptext">${xi.text}</div></div>
     <div class="grid">
       ${Object.entries(WORLDS).map(([id, w]) => tile(id, w)).join('')}
-      <button class="tile" style="background:#ff7aa2" data-go="trace"><span class="ic">✍️</span>なぞりがき</button>
+      <button class="tile" style="background:#ff7aa2${odd ? ';grid-column:span 2;min-height:84px' : ''}" data-go="trace"><span class="ic">✍️</span>なぞりがき</button>
     </div>
     <div class="subrow">
       <button class="btn" data-go="zukan">📖 ずかん <small style="color:var(--sub)">${colN + Object.keys(S.creatures).length}</small></button>
@@ -338,7 +459,7 @@ function home() {
     </div>
     <button class="parentlink" id="parent">おうちの かたへ（ながおし）</button>
   </div>`;
-  $('#pet').onclick = petTalk;
+  $('#pet').onclick = petTalk; bindGradeBar();
   app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => {
     SFX.tap(); const g = b.dataset.go;
     if (WORLDS[g]) world(g); else if (g === 'trace') traceMenu(); else if (g === 'zukan') zukan('life'); else if (g === 'shop') shop();
@@ -350,6 +471,17 @@ function home() {
     say(`おかえり！ きょうも いっしょに あそぼう`);
     setTimeout(home, 2500);
   }, 300);
+}
+
+function gradeBar() {
+  return `<div class="gradebar">${[1, 2, 3, 4, 5, 6].map(g => `<button class="gchip ${g === GRADE ? 'on' : ''}" data-grade="${g}">${g}<small>ねん</small></button>`).join('')}</div>`;
+}
+function bindGradeBar() {
+  app.querySelectorAll('[data-grade]').forEach(b => b.onclick = () => {
+    const g = +b.dataset.grade; if (g === GRADE) return;
+    SFX.tap(); loadProfile(g); WORLDS = worldsFor(g);
+    say(`${g}ねんせい`); home();
+  });
 }
 
 function longPress(el, fn) {
@@ -364,13 +496,14 @@ function longPress(el, fn) {
 function nameSetup() {
   const opts = ['ことりん', 'ぴよまる', 'もじっち', 'ぽこ'];
   app.innerHTML = `<div class="screen" style="text-align:center">
-    <h2>はじめまして！</h2>
+    ${gradeBar()}
+    <h2>${GRADE}ねんせいの たまご</h2>
     <div class="pet-wrap">${petHTML()}</div>
     <p style="font-size:18px;font-weight:700;line-height:1.7">たまごから うまれる おともだちに<br>なまえを つけてね</p>
     <div class="grid">${opts.map(o => `<button class="btn" data-n="${o}">${o}</button>`).join('')}</div>
     <input class="name" id="nm" maxlength="8" placeholder="じぶんで つける">
     <button class="btn go wide" id="ok">けってい！</button></div>`;
-  say('はじめまして！ たまごの おともだちに、なまえを つけてね');
+  say(`${GRADE}ねんせいの たまごだよ。 なまえを つけてね`); bindGradeBar();
   app.querySelectorAll('[data-n]').forEach(b => b.onclick = () => { $('#nm').value = b.dataset.n; SFX.tap(); });
   $('#ok').onclick = () => {
     const v = $('#nm').value.trim(); if (!v) { toast('なまえを えらんでね'); return; }
@@ -392,7 +525,7 @@ function world(id) {
   $('#back').onclick = () => { SFX.tap(); home(); };
   app.querySelectorAll('[data-m]').forEach(b => b.onclick = () => {
     SFX.tap(); const m = b.dataset.m;
-    startRound(id, m === 'mix' ? modes.map(x => x.id) : [m]);
+    startRound(id, m === 'mix' ? modes.filter(x => !x.noMix).map(x => x.id) : [m]);
   });
 }
 
@@ -429,8 +562,9 @@ function showQ() {
       <div id="fb"></div>`;
   } else {
     const long = Math.max(...q.choices.map(c => c.length));
-    const cls = q.labels ? 'long' : long >= 5 ? 'xlong' : long >= 3 || q.wide ? 'long' : '';
-    body = `<div class="choices">${q.choices.map(c => `<button class="choice ${cls}" data-v="${esc(c)}">${q.labels ? `<span class="ce">${q.labels[c]}</span>` : ''}${esc(c)}</button>`).join('')}</div><div id="fb"></div>`;
+    const one = !q.labels && long > 7;
+    const cls = one ? 'mcq' : q.labels ? 'long' : long >= 5 ? 'xlong' : long >= 3 || q.wide ? 'long' : '';
+    body = `<div class="choices ${one ? 'one' : ''}">${q.choices.map(c => `<button class="choice ${cls}" data-v="${esc(c)}">${q.labels ? `<span class="ce">${q.labels[c]}</span>` : ''}${esc(c)}</button>`).join('')}</div><div id="fb"></div>`;
   }
   app.innerHTML = `<div class="screen">${head}${card}${body}</div>`;
   $('#quit').onclick = () => { if (confirm('とちゅうで やめる？')) home(); };
@@ -569,7 +703,7 @@ function traceMenu() {
   app.innerHTML = `<div class="screen">
     <div class="topbar"><button class="iconbtn" id="back">◀</button><span class="spacer"></span><span class="pill">⭐ ${S.stars}</span></div>
     <h2>✍️ なぞりがき</h2>
-    <div class="modes">${Object.entries(TRACE_SETS).map(([t, s]) => `<button class="mode" data-t="${t}"><span class="ic">${t === 'h' ? 'あ' : t === 'k' ? 'ア' : '山'}</span>
+    <div class="modes">${Object.entries(traceSets()).map(([t, s]) => `<button class="mode" data-t="${t}"><span class="ic">${t === 'h' ? 'あ' : t === 'k' ? 'ア' : '山'}</span>
       <div><b>${s.name}</b><span>${cnt(t)} / ${s.list.length} もじ れんしゅう ずみ</span></div></button>`).join('')}</div>
     <p style="text-align:center;color:var(--sub);font-size:14px;line-height:1.6;margin-top:16px">うすい もじの うえを ゆびで なぞろう。<br>5もじ かけたら ごほうびガチャ！</p></div>`;
   say('なぞりがき。 ゆびで もじを なぞろう');
@@ -577,7 +711,7 @@ function traceMenu() {
   app.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { SFX.tap(); startTrace(b.dataset.t); });
 }
 function startTrace(t) {
-  const list = TRACE_SETS[t].list;
+  const list = traceSets()[t].list;
   const picked = [];
   while (picked.length < 5) {
     const c = wpick(list.filter(x => !picked.includes(x)), x => 'tr:' + x);
@@ -589,17 +723,17 @@ function startTrace(t) {
   showTrace();
 }
 function traceSay(t, c) {
-  if (t === 'j') { const K = KANJI.find(x => x.k === c); return `${K.w}、 ${K.r}の かんじ`; }
+  if (t === 'j') { const K = KL().find(x => x.k === c); return `${K.w}、 ${K.r}の かんじ`; }
   const h = t === 'k' ? HIRA[KATA.indexOf(c)] : c;
   const w = firstWord(h);
   return t === 'k' ? `カタカナの、${h}` : (w ? `${w[0]}の、${h}` : h);
 }
 function showTrace() {
   const t = R.trace, c = R.list[R.i];
-  const K = t === 'j' ? KANJI.find(x => x.k === c) : null;
+  const K = t === 'j' ? KL().find(x => x.k === c) : null;
   app.innerHTML = `<div class="screen">
     <div class="topbar"><button class="iconbtn" id="quit">✕</button><div class="progress">${R.list.map((_, k) => `<i class="${k < R.i ? 'ok' : k === R.i ? 'now' : ''}"></i>`).join('')}</div><span class="combo"></span></div>
-    <div class="traceinfo"><div class="r">${K ? `${K.e} ${esc(K.w)}（${K.r}）` : t === 'k' ? `ひらがなの「${HIRA[KATA.indexOf(c)]}」` : (firstWord(c) ? `${firstWord(c)[1]} ${firstWord(c)[0]} の「${c}」` : `「${c}」`)}</div></div>
+    <div class="traceinfo"><div class="r">${K ? `${K.e || "✏️"} ${esc(K.w)}（${K.r}）` : t === 'k' ? `ひらがなの「${HIRA[KATA.indexOf(c)]}」` : (firstWord(c) ? `${firstWord(c)[1]} ${firstWord(c)[0]} の「${c}」` : `「${c}」`)}</div></div>
     <div class="tracebox" id="tb"><canvas id="cg"></canvas><canvas id="cu"></canvas></div>
     <div id="fb"></div>
     <div class="tracebtns" id="tbtns"><button class="btn" id="spk">🔊</button><button class="btn" id="clr">けす</button><button class="btn go" id="done">できた！</button></div></div>`;
@@ -689,7 +823,8 @@ function finishTrace() {
 
 // ================= ずかん =================
 function zukan(tab) {
-  const tabs = { life: '🐾 いきもの', h: 'ひらがな', k: 'カタカナ', j: 'かんじ' };
+  const tabs = Object.assign({ life: '🐾 いきもの' }, Object.fromEntries(Object.entries(traceSets()).map(([k, v]) => [k, v.name])));
+  if (GRADE === 1) { delete tabs.j; tabs.j = 'かんじ'; }
   let inner = '', count = '';
   if (tab === 'life') {
     const have = CREATURES.filter(c => S.creatures[c[0]]).length;
@@ -698,7 +833,7 @@ function zukan(tab) {
       ? `<div class="zcell r${c[2]}" data-c="${c[0]}" style="font-size:32px">${c[0]}<span class="cnt">×${S.creatures[c[0]]}</span></div>`
       : `<div class="zcell no">？</div>`).join('')}</div>`;
   } else {
-    const list = TRACE_SETS[tab].list;
+    const list = traceSets()[tab].list;
     const have = list.filter(c => S.col[tab][c]).length;
     count = `${have} / ${list.length} もじ ゲット　<small style="color:var(--sub)">✍️＝なぞりがき ずみ</small>`;
     inner = `<div class="zgrid ${tab === 'j' ? 'k' : ''}">${list.map(c => S.col[tab][c]
@@ -743,7 +878,7 @@ function shop() {
 const keyLabel = k => {
   const [t, v] = [k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)];
   return ({ h: 'ひらがな', k: 'カタカナ', j: '漢字', sp: '表記（っ・ゃ・のばす音）', kw: 'カタカナ語', kh: 'ひらがな/カタカナの使い分け', op: '反対語', od: 'なかま分け',
-    sh: 'しりとり', pa: '助詞 は・を・へ', wb: 'わ・お・え', or: '語順', tr: 'なぞり書き' }[t] || t) + '：' + v.slice(0, 14);
+    sh: 'しりとり', pa: '助詞 は・を・へ', wb: 'わ・お・え', or: '語順', tr: 'なぞり書き', jr: '前の学年の漢字', jk: '熟語', ok: '送りがな', bp: '文のきまり', kt: 'ことわざ・慣用句など', rm: 'ローマ字' }[t] || t) + '：' + v.slice(0, 14);
 };
 function parent() {
   const wn = Object.fromEntries(Object.entries(WORLDS).map(([k, v]) => [k, v.name]));
@@ -753,9 +888,9 @@ function parent() {
   const tog = (k, l) => `<div class="row"><span>${l}</span><button class="toggle ${S.settings[k] ? 'on' : ''}" data-s="${k}">${S.settings[k] ? 'オン' : 'オフ'}</button></div>`;
   app.innerHTML = `<div class="screen">
     <div class="topbar"><button class="iconbtn" id="back">◀</button><span class="spacer"></span><b>おうちの方へ</b><span class="spacer"></span><span style="width:44px"></span></div>
-    <div class="pcard"><h3>📊 がんばりの記録</h3>
+    <div class="pcard"><h3>📊 がんばりの記録（${GRADE}年生）</h3><small style="color:var(--sub)">記録は学年ごとに別々です。ほかの学年はホーム上の数字で切り替えると見られます。</small><br>
       遊んだ回数：<b>${S.rounds}</b>回　／　遊んだ日数：<b>${S.days.total}</b>日（連続 ${S.days.streak}日）<br>
-      覚えた文字：ひらがな ${Object.keys(S.col.h).length}/46、カタカナ ${Object.keys(S.col.k).length}/46、漢字 ${Object.keys(S.col.j).length}/80<br>
+      覚えた文字：ひらがな ${Object.keys(S.col.h).length}/46、カタカナ ${Object.keys(S.col.k).length}/46、漢字 ${Object.keys(S.col.j).length}/${KL().length}<br>
       なぞり書き：ひらがな ${Object.keys(S.traced.h).length}、カタカナ ${Object.keys(S.traced.k).length}、漢字 ${Object.keys(S.traced.j).length}</div>
     <div class="pcard"><h3>✅ 分野ごとの正答率</h3>${stats}</div>
     <div class="pcard"><h3>🔁 つまずいている所</h3>${weak.length ? weak.map(([k, v]) => `<div>・${esc(keyLabel(k))}（${v}）</div>`).join('') + '<small style="color:var(--sub)">間違えた問題は自動で多めに出題され、正解すると減っていきます。</small>' : 'まだありません'}</div>
@@ -764,13 +899,13 @@ function parent() {
       iPhone・iPad：Safariで開き、下の共有ボタン（□に↑）→「ホーム画面に追加」。<br>
       読み上げが聞こえないときは、本体の消音スイッチ（マナーモード）を切ってください。<br>
       データはこの端末の中だけに保存されます（送信はしていません）。</div>
-    <div class="pcard"><h3>🧑‍🏫 学習内容</h3>小学1年生の国語：ひらがな・カタカナ（46字ずつ）、1年生で習う漢字80字、反対語・なかま分け・しりとり、助詞「は・を・へ」、語順。<br><small style="color:var(--sub)">バージョン ${VERSION}</small></div>
+    <div class="pcard"><h3>🧑‍🏫 学習内容</h3>1年生：ひらがな・カタカナ、漢字80字、反対語・なかま分け・しりとり、助詞「は・を・へ」、語順。<br>2〜6年生：その学年で習う漢字（学年別漢字配当表どおり、計1026字）と前の学年の復習、熟語・送りがな、文のきまり（主語・述語、こそあど、修飾語、つなぎ言葉、敬語、熟語の構成など）、2年はカタカナ・ことば遊び、3年はことわざ・ローマ字、4年は慣用句、5年は故事成語、6年は四字熟語。<br><small style="color:var(--sub)">バージョン ${VERSION}</small></div>
     <button class="btn wide danger" id="reset">データをすべて消す</button></div>`;
   $('#back').onclick = home;
   app.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { const k = b.dataset.s; S.settings[k] = !S.settings[k]; save(); parent(); if (k !== 'sound') say('こんにちは'); });
   $('#reset').onclick = () => {
     if (confirm('育てたキャラ・図鑑・記録がすべて消えます。よろしいですか？') && confirm('本当に消しますか？（元に戻せません）')) {
-      localStorage.removeItem(KEY); S = DEFAULT(); save(); home();
+      localStorage.removeItem(KEY); S = DEFAULT(); S.settings = SET; save(); home();
     }
   };
 }
@@ -778,5 +913,5 @@ function parent() {
 // ================= きどう =================
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 document.addEventListener('gesturestart', e => e.preventDefault());
-window.KOKUGO = { G, S: () => S, judgeTrace, WORLDS };
+window.KOKUGO = { G, S: () => S, judgeTrace, W: () => WORLDS };
 home();
